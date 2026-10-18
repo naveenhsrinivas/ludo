@@ -113,6 +113,8 @@ function seatIn(ws: WebSocket, conn: Conn, room: Room, seat: Seat | string): voi
 
 function handle(ws: WebSocket, conn: Conn, msg: ClientMessage): string | void {
   switch (msg.t) {
+    case "ping":
+      return;
     case "create": {
       if (!isSecret(msg.secret)) return "Invalid session.";
       if (rooms.size >= MAX_ROOMS) return "The server is busy. Please try again later.";

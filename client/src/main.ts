@@ -86,6 +86,7 @@ conn.hello = () => {
   rejoining = true;
   return { t: "join", code: savedRoom, name: nameInput.value.trim() || "Player", secret };
 };
+conn.keepAlive = () => room !== null;
 let wasOnline = true;
 conn.onStatus((online) => {
   document.body.classList.toggle("offline", !online);

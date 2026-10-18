@@ -56,8 +56,18 @@ Rooms live in the server's memory. Restarting the server ends any games in progr
 
 ## Hosting
 
-The game needs a Node.js host that supports WebSockets, such as Render, Railway or Fly.io. GitHub Pages won't work, because it can't run a server.
+The game needs a Node.js host that supports WebSockets. GitHub Pages won't work, because it can't run a server.
 
-- **Build command:** `npm install && npm run build`
+**Render (free):** `render.yaml` sets everything up.
+
+1. In Render, choose **New → Blueprint**.
+2. Pick this repo, then click **Apply**.
+3. Every push to `main` redeploys automatically.
+
+On the free plan the server sleeps after 15 minutes with no visitors. The first visit afterwards takes about a minute to load. Browsers in a room send a small keep-alive every 4 minutes, so a game in progress doesn't put the server to sleep.
+
+**Other hosts (Railway, Fly.io…):**
+
+- **Build command:** `npm ci && npm run build`
 - **Start command:** `npm start`
 - **Health check:** `/health`

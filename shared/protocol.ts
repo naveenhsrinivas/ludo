@@ -19,7 +19,9 @@ export type ClientMessage =
   | { t: "chat"; text: string }
   | { t: "emoji"; emoji: string }
   | { t: "again" }
-  | { t: "leave" };
+  | { t: "leave" }
+  /** Keep-alive, so free hosting doesn't sleep mid-game. */
+  | { t: "ping" };
 
 export interface SeatView {
   /** Public id (never the secret). */

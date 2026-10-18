@@ -20,7 +20,14 @@ export class Connection {
       if (document.visibilityState === "visible" && !this.online) this.open();
     });
     window.addEventListener("online", () => this.open());
+    // Free hosting (e.g. Render) sleeps after 15 idle minutes; a small message keeps a game awake.
+    setInterval(() => {
+      if (this.online && this.keepAlive()) this.ws!.send(JSON.stringify({ t: "ping" }));
+    }, 4 * 60_000);
   }
+
+  /** Whether to send keep-alives (only while in a room). */
+  keepAlive: () => boolean = () => false;
 
   get online(): boolean {
     return this.ws?.readyState === WebSocket.OPEN;
