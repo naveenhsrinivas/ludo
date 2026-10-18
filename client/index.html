@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#141432">
+  <meta name="description" content="Play Ludo online with friends or against the computer.">
+  <title>Ludo Live</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@500;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="backdrop" aria-hidden="true"></div>
+
+  <!-- Home -->
+  <main id="home" class="screen home">
+    <header class="hero">
+      <div class="logo" aria-label="Ludo Live">
+        <span class="l red">L</span><span class="l green">U</span><span class="l yellow">D</span><span class="l blue">O</span>
+        <span class="live">LIVE</span>
+      </div>
+      <p class="tagline">Roll, race and capture — with friends or the computer.</p>
+    </header>
+
+    <section class="card name-card">
+      <label for="name-input" class="field-label">Your name</label>
+      <input id="name-input" class="text-input" maxlength="16" autocomplete="nickname" placeholder="Enter your name" spellcheck="false">
+    </section>
+
+    <div class="mode-grid">
+      <section class="card mode">
+        <div class="mode-icon">👥</div>
+        <h2>Play with friends</h2>
+        <p>Create a private room and share the code.</p>
+        <button id="create-btn" class="btn primary">Create room</button>
+      </section>
+
+      <section class="card mode">
+        <div class="mode-icon">🔑</div>
+        <h2>Join a room</h2>
+        <p>Got a code from a friend? Enter it here.</p>
+        <form id="join-form" class="join-row">
+          <input id="code-input" class="text-input code" maxlength="5" placeholder="CODE" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Room code">
+          <button class="btn primary" type="submit">Join</button>
+        </form>
+      </section>
+
+      <section class="card mode">
+        <div class="mode-icon">🤖</div>
+        <h2>Play vs computer</h2>
+        <p>Practise against computer players.</p>
+        <div class="segmented" id="bot-count" role="radiogroup" aria-label="Number of computer players">
+          <button data-value="1" role="radio" aria-checked="true" class="active">1</button>
+          <button data-value="2" role="radio" aria-checked="false">2</button>
+          <button data-value="3" role="radio" aria-checked="false">3</button>
+        </div>
+        <button id="bots-btn" class="btn secondary">Play now</button>
+      </section>
+    </div>
+
+    <details class="card rules">
+      <summary>How to play</summary>
+      <ul>
+        <li>Roll a <b>6</b> to bring a token out of your base.</li>
+        <li>Move your tokens clockwise around the board and up your coloured path to the centre.</li>
+        <li>Land on an opponent to send them back to base. <b>⭐ Stars</b> and start squares are safe.</li>
+        <li>Rolling a 6, capturing, or getting a token home earns another roll — but three 6s in a row lose your turn.</li>
+        <li>You need the exact number to reach home. First to get all four tokens home wins!</li>
+      </ul>
+    </details>
+  </main>
+
+  <!-- Lobby -->
+  <main id="lobby" class="screen lobby hidden">
+    <div class="topbar">
+      <button class="icon-btn" id="lobby-leave" aria-label="Leave room" title="Leave">←</button>
+      <span class="topbar-title">Waiting room</span>
+      <button class="icon-btn chat-toggle" aria-label="Open chat" title="Chat">💬<span class="badge hidden"></span></button>
+    </div>
+
+    <section class="card code-card">
+      <p class="field-label">Room code</p>
+      <div class="room-code" id="lobby-code">-----</div>
+      <div class="share-row">
+        <button id="copy-code" class="btn ghost">Copy code</button>
+        <button id="share-link" class="btn ghost">Share invite link</button>
+      </div>
+    </section>
+
+    <section class="seats" id="seats"></section>
+
+    <p id="lobby-hint" class="hint"></p>
+    <button id="start-btn" class="btn primary big">Start game</button>
+  </main>
+
+  <!-- Game -->
+  <main id="game" class="screen game hidden">
+    <div class="topbar">
+      <button class="icon-btn" id="game-leave" aria-label="Leave game" title="Leave">←</button>
+      <span class="topbar-title">Room <b id="game-code"></b></span>
+      <div class="topbar-actions">
+        <button class="icon-btn" id="sound-btn" aria-label="Sound on" title="Sound">🔊</button>
+        <button class="icon-btn chat-toggle" aria-label="Open chat" title="Chat">💬<span class="badge hidden"></span></button>
+      </div>
+    </div>
+
+    <p id="status" class="status" aria-live="polite"></p>
+
+    <div class="table" id="table">
+      <div class="panel-slot" data-corner="tl"></div>
+      <div class="panel-slot" data-corner="tr"></div>
+      <div class="board-wrap"><div id="board" class="board"></div></div>
+      <div class="panel-slot" data-corner="bl"></div>
+      <div class="panel-slot" data-corner="br"></div>
+    </div>
+
+    <div class="react-bar" id="react-bar" aria-label="Send a reaction"></div>
+  </main>
+
+  <!-- Results -->
+  <div id="results" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="results-title">
+    <div class="modal-card results-card">
+      <div class="trophy">🏆</div>
+      <h2 id="results-title">Game over</h2>
+      <ol id="ranking" class="ranking"></ol>
+      <div class="modal-actions">
+        <button id="again-btn" class="btn primary">Play again</button>
+        <button id="home-btn" class="btn ghost">Home</button>
+      </div>
+      <p id="again-hint" class="hint"></p>
+    </div>
+  </div>
+
+  <!-- Confirm leave -->
+  <div id="confirm" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+    <div class="modal-card">
+      <h2 id="confirm-title">Leave the game?</h2>
+      <p id="confirm-text" class="hint">A computer player will take over your tokens.</p>
+      <div class="modal-actions">
+        <button id="confirm-yes" class="btn danger">Leave</button>
+        <button id="confirm-no" class="btn ghost">Stay</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chat -->
+  <aside id="chat" class="chat" aria-label="Chat" aria-hidden="true">
+    <header class="chat-head">
+      <b>Chat</b>
+      <button class="icon-btn" id="chat-close" aria-label="Close chat">✕</button>
+    </header>
+    <ol id="chat-log" class="chat-log"></ol>
+    <div class="chat-emojis" id="chat-emojis"></div>
+    <form id="chat-form" class="chat-form">
+      <input id="chat-input" class="text-input" maxlength="200" placeholder="Say something nice…" autocomplete="off" aria-label="Message">
+      <button class="btn primary" type="submit" aria-label="Send">➤</button>
+    </form>
+  </aside>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <canvas id="confetti" class="confetti" aria-hidden="true"></canvas>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

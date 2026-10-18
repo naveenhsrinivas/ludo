@@ -1,0 +1,24 @@
+{
+  "name": "ludo",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n server,client -c blue,green \"tsx watch server/index.ts\" \"vite\"",
+    "build": "tsc -p tsconfig.json && vite build && tsc -p tsconfig.server.json",
+    "start": "node dist/server/server/index.js",
+    "test": "tsx --test shared/*.test.ts server/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/ws": "^8.18.2",
+    "concurrently": "^10.0.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4"
+  }
+}
