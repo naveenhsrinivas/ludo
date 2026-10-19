@@ -50,6 +50,7 @@ class Player {
     const me = r.seats.find((s) => s.id === r.you);
     if (!g || r.status !== "playing" || !me || g.colors[g.turn] !== me.color) return;
     if (g.phase === "roll") this.send({ t: "roll" });
+    else if (!g.movable.length) this.send({ t: "pass" });
     else this.send({ t: "move", token: g.movable[0] });
   }
 
@@ -188,4 +189,57 @@ test("bad input is rejected without crashing the server", { timeout: 10_000 }, a
   await q.until((x) => x.room?.status === "playing");
   assert.equal(q.room!.seats.length, 4);
   q.close();
+});
+
+test("house rules, dice skins, gems and stickers", { timeout: 20_000 }, async () => {
+  const host = new Player("Host");
+  const guest = new Player("Guest");
+  await host.connect();
+  await guest.connect();
+  host.send({ t: "create", name: "Host", secret: host.secret, dice: "galaxy" });
+  await host.until((p) => !!p.room);
+  assert.equal(host.room!.seats[0].dice, "galaxy");
+  assert.deepEqual(host.room!.options, { easySixes: true, quickStart: false, gems: 5 });
+
+  guest.send({ t: "join", code: host.room!.code, name: "Guest", secret: guest.secret, dice: "not-a-skin" });
+  await host.until((p) => p.room?.seats.length === 2);
+  assert.equal(host.room!.seats[1].dice, "classic", "unknown skins fall back to classic");
+  guest.send({ t: "dice", skin: "neon" });
+  await host.until((p) => p.room!.seats[1].dice === "neon");
+
+  // Only the host changes the rules, and values are checked.
+  guest.send({ t: "options", options: { quickStart: true } });
+  await guest.until((p) => p.errors.some((e) => /host/.test(e)));
+  host.send({ t: "options", options: { quickStart: true, gems: 99, easySixes: "yes" } as never });
+  await guest.until((p) => p.room!.options.quickStart);
+  assert.deepEqual(guest.room!.options, { easySixes: true, quickStart: true, gems: 5 });
+
+  // Stickers only during a game, and only at someone else.
+  guest.send({ t: "sticker", sticker: "rose", to: host.room!.you! });
+  await guest.until((p) => p.errors.some((e) => /once the game starts/.test(e)));
+
+  host.send({ t: "start" });
+  await guest.until((p) => p.room?.status === "playing");
+  const g = guest.room!.game!;
+  assert.deepEqual(g.tokens.red, [0, -1, -1, -1], "quick start: one token out");
+  assert.equal(g.gems.red, 5);
+
+  guest.send({ t: "sticker", sticker: "bomb", to: host.room!.you! });
+  guest.send({ t: "sticker", sticker: "rose", to: guest.room!.you! });
+  guest.send({ t: "sticker", sticker: "grenade", to: host.room!.you! });
+  await host.until((p) => p.chat.some((m) => m.sticker === "bomb"));
+  await new Promise((r) => setTimeout(r, 200));
+  assert.equal(host.chat.filter((m) => m.sticker).length, 1, "self-targeted and unknown stickers are ignored");
+  assert.equal(host.chat[0].to, host.room!.you);
+
+  // The host (red) rolls, then spends a gem on a re-roll.
+  host.send({ t: "roll" });
+  await host.until((p) => p.room!.game!.phase === "move" || p.room!.game!.turn !== 0);
+  if (host.room!.game!.phase === "move" && host.room!.game!.turn === 0) {
+    host.send({ t: "reroll" });
+    await host.until((p) => p.room!.event === "reroll");
+    assert.equal(host.room!.game!.gems.red, 4);
+  }
+  host.close();
+  guest.close();
 });

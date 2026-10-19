@@ -1,15 +1,42 @@
 import { randomBytes, randomInt } from "node:crypto";
 import type { WebSocket } from "ws";
 import { COLORS, type Color } from "../shared/board.js";
-import { chooseMove } from "../shared/bot.js";
-import { EMOJIS, MAX_CHAT, MAX_NAME, MAX_PLAYERS, type ChatMessage, type RoomView, type ServerMessage } from "../shared/protocol.js";
-import { applyMove, applyRoll, currentColor, newGame, onlyOneChoice, type GameState } from "../shared/rules.js";
+import { chooseMove, wantsReroll } from "../shared/bot.js";
+import {
+  DICE_SKINS,
+  EMOJIS,
+  MAX_CHAT,
+  MAX_NAME,
+  MAX_PLAYERS,
+  STICKERS,
+  type ChatMessage,
+  type DiceSkin,
+  type RoomView,
+  type ServerMessage,
+  type StickerId,
+} from "../shared/protocol.js";
+import {
+  applyMove,
+  applyPass,
+  applyReroll,
+  applyRoll,
+  canReroll,
+  GEMS_PER_GAME,
+  currentColor,
+  DEFAULT_OPTIONS,
+  newGame,
+  onlyOneChoice,
+  rollValue,
+  type GameOptions,
+  type GameState,
+} from "../shared/rules.js";
 
 // ---------- Timing (ms) ----------
 // The server waits for the clients' animations before the next automatic action.
 // LUDO_TIME_SCALE speeds everything up for tests.
 const SCALE = Number(process.env.LUDO_TIME_SCALE) || 1;
 export const TURN_TIME = 30_000 * SCALE; // a player has this long to roll or move
+const DECIDE_TIME = 12_000 * SCALE; // to choose re-roll or pass after a roll with no moves
 const OFFLINE_DELAY = 4_000 * SCALE; // disconnected players are played for after this
 const BOT_ROLL_DELAY = 800 * SCALE;
 const BOT_MOVE_DELAY = 600 * SCALE;
@@ -28,9 +55,19 @@ export interface Seat {
   color: Color;
   bot: boolean;
   left: boolean;
+  dice: DiceSkin;
   socket: WebSocket | null;
   chatTimes: number[];
 }
+
+const SKIN_IDS = Object.keys(DICE_SKINS) as DiceSkin[];
+
+export function cleanSkin(raw: unknown): DiceSkin {
+  return SKIN_IDS.includes(raw as DiceSkin) ? (raw as DiceSkin) : "classic";
+}
+
+/** Uniform random number in [0, 1) from the crypto generator. */
+const secureRandom = () => randomInt(0, 2 ** 47) / 2 ** 47;
 
 /** Colours used for each player count, spread around the board. */
 export function colorsFor(n: number): Color[] {
@@ -55,6 +92,7 @@ export class Room {
   status: RoomView["status"] = "lobby";
   game: GameState | null = null;
   chat: ChatMessage[] = [];
+  options: GameOptions = { ...DEFAULT_OPTIONS };
   /** When the last human disconnected; used to clean up abandoned rooms. */
   emptySince: number | null = null;
 
@@ -62,6 +100,8 @@ export class Room {
   private chatId = 0;
   private timer: NodeJS.Timeout | null = null;
   private deadline: number | null = null;
+  /** Length of the current countdown, for the timer ring. */
+  private timerLength = TURN_TIME;
   /** How long the clients need to animate what just happened. */
   private animating = 0;
   private event: RoomView["event"] = null;
@@ -70,12 +110,13 @@ export class Room {
 
   // ---------- Seats ----------
   /** Seat a browser (new or returning). Returns an error message on failure. */
-  join(socket: WebSocket, name: string, secret: string): Seat | string {
+  join(socket: WebSocket, name: string, secret: string, dice: DiceSkin = "classic"): Seat | string {
     const existing = this.seats.find((s) => s.secret === secret);
     if (existing) {
       if (existing.socket && existing.socket !== socket) this.send(existing.socket, { t: "left" });
       existing.socket = socket;
       existing.left = false;
+      existing.dice = dice;
       if (this.status === "lobby") existing.name = name;
       this.emptySince = null;
       // Also resumes a game that was paused because everyone had gone.
@@ -92,6 +133,7 @@ export class Room {
       color: "red",
       bot: false,
       left: false,
+      dice,
       socket,
       chatTimes: [],
     };
@@ -116,11 +158,28 @@ export class Room {
       color: "red",
       bot: true,
       left: false,
+      dice: SKIN_IDS[randomInt(SKIN_IDS.length)],
       socket: null,
       chatTimes: [],
     });
     this.recolor();
     this.changed();
+  }
+
+  setDice(seat: Seat, skin: unknown): void {
+    seat.dice = cleanSkin(skin);
+    this.changed(false);
+  }
+
+  setOptions(by: Seat, options: unknown): string | void {
+    if (by.id !== this.host) return "Only the host can change the rules.";
+    if (this.status !== "lobby") return "Rules can only be changed before the game starts.";
+    if (!options || typeof options !== "object") return;
+    const o = options as Record<string, unknown>;
+    if (typeof o.easySixes === "boolean") this.options.easySixes = o.easySixes;
+    if (typeof o.quickStart === "boolean") this.options.quickStart = o.quickStart;
+    if (typeof o.gems === "number" && Number.isFinite(o.gems)) this.options.gems = Math.max(0, Math.min(GEMS_PER_GAME, Math.round(o.gems)));
+    this.changed(false);
   }
 
   removeSeat(by: Seat, id: string): string | void {
@@ -178,7 +237,7 @@ export class Room {
     if (this.status !== "lobby") return;
     if (this.seats.length < 2) return "You need at least 2 players. Add a computer player to play now.";
     this.recolor();
-    this.game = newGame(this.seats.map((s) => s.color));
+    this.game = newGame(this.seats.map((s) => s.color), this.options);
     this.status = "playing";
     this.animating = 600 * SCALE;
     this.event = "start";
@@ -201,9 +260,32 @@ export class Room {
     if (!g || this.status !== "playing") return;
     if (by && by.color !== currentColor(g)) return "It's not your turn.";
     if (g.phase !== "roll") return;
-    applyRoll(g, randomInt(1, 7));
+    applyRoll(g, rollValue(g, secureRandom));
     this.animating = ROLL_ANIMATION;
     this.event = "roll";
+    this.changed();
+  }
+
+  /** Spend a gem to roll again. */
+  reroll(by: Seat | null): string | void {
+    const g = this.game;
+    if (!g || this.status !== "playing") return;
+    if (by && by.color !== currentColor(g)) return "It's not your turn.";
+    if (!canReroll(g)) return g.phase === "move" ? "You're out of gems! 💎" : undefined;
+    applyReroll(g, rollValue(g, secureRandom));
+    this.animating = ROLL_ANIMATION;
+    this.event = "reroll";
+    this.changed();
+  }
+
+  /** Give up the turn after a roll with no possible move. */
+  pass(by: Seat | null): string | void {
+    const g = this.game;
+    if (!g || this.status !== "playing") return;
+    if (by && by.color !== currentColor(g)) return "It's not your turn.";
+    if (g.phase !== "move" || g.movable.length) return;
+    applyPass(g);
+    this.event = "pass";
     this.changed();
   }
 
@@ -217,21 +299,74 @@ export class Room {
     if (g.ranking.length === g.colors.length) this.status = "over";
     this.event = "move";
     this.changed();
+    this.botBanter(m.color, m.captures.map((c) => c.color));
   }
 
   chatMessage(seat: Seat, text: unknown, emoji: unknown): string | void {
-    const now = Date.now();
-    seat.chatTimes = seat.chatTimes.filter((t) => now - t < 5000);
-    if (seat.chatTimes.length >= 5) return "Slow down a little!";
-
-    const msg: ChatMessage = { id: ++this.chatId, seat: seat.id, name: seat.name, color: seat.color, at: now };
+    if (!this.allowChat(seat)) return "Slow down a little!";
+    const msg: ChatMessage = { id: ++this.chatId, seat: seat.id, name: seat.name, color: seat.color, at: Date.now() };
     if (typeof emoji === "string" && (EMOJIS as readonly string[]).includes(emoji)) msg.emoji = emoji;
     else {
       const clean = cleanChat(text);
       if (!clean) return;
       msg.text = clean;
     }
-    seat.chatTimes.push(now);
+    this.pushChat(seat, msg);
+  }
+
+  /** Throw a sticker at another player during a game. */
+  sticker(seat: Seat, sticker: unknown, to: unknown): string | void {
+    if (this.status === "lobby") return "Stickers can be thrown once the game starts.";
+    if (typeof sticker !== "string" || !Object.hasOwn(STICKERS, sticker)) return;
+    const target = this.seats.find((s) => s.id === to);
+    if (!target || target === seat) return;
+    if (!this.allowChat(seat)) return "Slow down a little!";
+    this.pushChat(seat, {
+      id: ++this.chatId,
+      seat: seat.id,
+      name: seat.name,
+      color: seat.color,
+      sticker: sticker as StickerId,
+      to: target.id,
+      at: Date.now(),
+    });
+  }
+
+  /** Computer players sometimes throw a sticker after a capture, to keep things lively. */
+  private botBanter(mover: Color, victims: Color[]): void {
+    const by = this.seatFor(mover);
+    for (const v of new Set(victims)) {
+      const victim = this.seatFor(v);
+      if (!by || !victim) continue;
+      // A bot teases the human it captured, or throws something at the human who captured it.
+      let thrower: Seat, target: Seat, sticker: StickerId;
+      if (by.bot && !victim.bot) [thrower, target, sticker] = [by, victim, Math.random() < 0.5 ? "chicken" : "tomato"];
+      else if (victim.bot && !by.bot) [thrower, target, sticker] = [victim, by, Math.random() < 0.5 ? "tomato" : "bomb"];
+      else continue;
+      if (Math.random() > 0.4) continue;
+      setTimeout(() => {
+        if (this.status === "lobby") return;
+        this.pushChat(thrower, {
+          id: ++this.chatId,
+          seat: thrower.id,
+          name: thrower.name,
+          color: thrower.color,
+          sticker,
+          to: target.id,
+          at: Date.now(),
+        });
+      }, 1500 * SCALE);
+    }
+  }
+
+  private allowChat(seat: Seat): boolean {
+    const now = Date.now();
+    seat.chatTimes = seat.chatTimes.filter((t) => now - t < 5000);
+    return seat.chatTimes.length < 6;
+  }
+
+  private pushChat(seat: Seat, msg: ChatMessage): void {
+    seat.chatTimes.push(msg.at);
     this.chat.push(msg);
     this.chat = this.chat.slice(-50);
     for (const s of this.seats) if (s.socket) this.send(s.socket, { t: "chat", msg });
@@ -265,6 +400,10 @@ export class Room {
     if (g.phase === "roll") {
       action = () => this.roll(null);
       delay = auto ? BOT_ROLL_DELAY : offline ? OFFLINE_DELAY : TURN_TIME;
+    } else if (!g.movable.length) {
+      // No move possible: re-roll with a gem, or pass.
+      action = () => (auto && wantsReroll(g) ? this.reroll(null) : this.pass(null));
+      delay = auto ? BOT_MOVE_DELAY : offline ? OFFLINE_DELAY : DECIDE_TIME;
     } else {
       action = () => this.move(null, chooseMove(g));
       if (onlyOneChoice(g)) delay = AUTO_MOVE_DELAY;
@@ -272,7 +411,10 @@ export class Room {
     }
 
     const at = Date.now() + wait + delay;
-    if (!auto && !offline && delay === TURN_TIME) this.deadline = at;
+    if (!auto && !offline) {
+      this.deadline = at;
+      this.timerLength = delay;
+    }
     this.timer = setTimeout(action, wait + delay);
   }
 
@@ -299,10 +441,12 @@ export class Room {
         bot: s.bot,
         connected: s.bot || s.socket !== null,
         left: s.left,
+        dice: s.dice,
       })),
+      options: this.options,
       game: this.game,
       timeLeft: this.deadline ? Math.max(0, this.deadline - Date.now()) : null,
-      turnTime: TURN_TIME,
+      turnTime: this.timerLength,
       seq: this.seq,
       event: this.event,
     };

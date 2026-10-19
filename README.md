@@ -7,6 +7,13 @@ Play Ludo in the browser with friends or against the computer. Works on phones, 
 - **Play with friends:** create a room and share its 5-letter code or invite link. 2–4 players.
 - **Computer players:** fill empty seats with bots, or play solo against 1–3 of them.
 - **Chat and emoji reactions:** reactions pop up next to the player who sent them.
+- **Stickers:** tap another player to throw a 🌹 rose, 💣 bomb, 🍅 tomato, 💋 kiss, ❤️ heart, 🥚 egg, 👑 crown or 🐔 chicken. Each one has its own effect. Computer players sometimes throw one back after a capture.
+- **Gems 💎:** everyone gets 5 per game. Spend one to re-roll the dice, either to swap a bad number or to try again when you have no moves.
+- **Dice skins:** pick Classic, Ruby, Gold, Galaxy, Neon or Wood. Everyone sees your skin when you roll.
+- **House rules (host, in the waiting room):**
+  - **Easy sixes** (on by default): while all your tokens are at home, a 6 comes up 40% of the time, and you get one by your third roll at the latest.
+  - **Gems:** on by default.
+  - **Quick start:** everyone begins with one token out.
 - **Classic rules:**
   - Roll a 6 to bring a token out.
   - A 6, a capture, or getting a token home earns another roll. Three 6s in a row lose your turn.
@@ -18,6 +25,7 @@ Play Ludo in the browser with friends or against the computer. Works on phones, 
 - **Polish:**
   - Each player sees their own colour at the bottom left.
   - Tokens hop square by square, and a 3D dice tumbles.
+  - Banners pop up for sixes, captures and tokens reaching home, and the board shakes on a capture.
   - Sound effects (with a mute button), vibration on phones, and confetti for the winner.
 
 ## Run locally
@@ -44,12 +52,13 @@ npm test        # rules tests, 600 simulated games, and end-to-end server tests
 ```
 shared/   board.ts     board layout (track, home columns, safe squares)
           rules.ts     game rules — pure functions, used by the server and tests
-          bot.ts       computer player
+          bot.ts       computer player (moves and when to spend gems)
           protocol.ts  WebSocket message types
 server/   index.ts     HTTP server for the built client + WebSocket endpoint at /ws
           room.ts      rooms, seats, turn timers, bots, chat
 client/   index.html, src/main.ts (screens and app flow), board.ts (SVG board and
-          animations), dice.ts, sound.ts, net.ts (auto-reconnecting socket), style.css
+          animations), dice.ts (3D dice and skins), stickers.ts (sticker effects),
+          sound.ts, net.ts (auto-reconnecting socket), style.css
 ```
 
 Rooms live in the server's memory. Restarting the server ends any games in progress.

@@ -1,12 +1,24 @@
 import "./style.css";
 import { FINISH, type Color } from "../../shared/board.js";
-import { EMOJIS, MAX_PLAYERS, type ChatMessage, type RoomView, type SeatView, type ServerMessage } from "../../shared/protocol.js";
-import { onlyOneChoice } from "../../shared/rules.js";
+import {
+  DICE_SKINS,
+  EMOJIS,
+  MAX_PLAYERS,
+  STICKERS,
+  type ChatMessage,
+  type DiceSkin,
+  type RoomView,
+  type SeatView,
+  type ServerMessage,
+  type StickerId,
+} from "../../shared/protocol.js";
+import { canReroll, GEMS_PER_GAME, onlyOneChoice } from "../../shared/rules.js";
 import { Board, cornerOf, PALETTE } from "./board.js";
 import { confetti } from "./confetti.js";
-import { Dice } from "./dice.js";
+import { Dice, miniDice } from "./dice.js";
 import { Connection, socketUrl } from "./net.js";
 import { buzz, play, setSound, soundOn, unlockAudio } from "./sound.js";
+import { throwSticker } from "./stickers.js";
 
 // ---------- Helpers ----------
 function $<T extends HTMLElement = HTMLElement>(id: string): T {
@@ -57,6 +69,30 @@ const nameInput = $<HTMLInputElement>("name-input");
 nameInput.value = store("ludo:name") ?? "";
 nameInput.addEventListener("input", () => store("ludo:name", nameInput.value.trim()));
 
+const SKINS = Object.keys(DICE_SKINS) as DiceSkin[];
+let mySkin: DiceSkin = SKINS.includes(store("ludo:dice") as DiceSkin) ? (store("ludo:dice") as DiceSkin) : "classic";
+
+/** A row of dice to choose a style from. */
+function renderSkinPicker(host: HTMLElement): void {
+  host.replaceChildren();
+  for (const skin of SKINS) {
+    const b = h("button", `skin-option${skin === mySkin ? " active" : ""}`);
+    b.type = "button";
+    b.setAttribute("role", "radio");
+    b.setAttribute("aria-checked", String(skin === mySkin));
+    b.append(miniDice(skin, 5), DICE_SKINS[skin]);
+    b.addEventListener("click", () => {
+      mySkin = skin;
+      store("ludo:dice", skin);
+      for (const id of ["home-skins", "lobby-skins"]) renderSkinPicker($(id));
+      if (room) conn.send({ t: "dice", skin });
+      dice.setSkin(skin);
+      void dice.roll(1 + Math.floor(Math.random() * 6), 450);
+    });
+    host.appendChild(b);
+  }
+}
+
 let savedRoom = store("ludo:room");
 let rejoining = false;
 
@@ -84,7 +120,7 @@ const conn = new Connection(socketUrl());
 conn.hello = () => {
   if (!savedRoom) return null;
   rejoining = true;
-  return { t: "join", code: savedRoom, name: nameInput.value.trim() || "Player", secret };
+  return { t: "join", code: savedRoom, name: nameInput.value.trim() || "Player", secret, dice: mySkin };
 };
 conn.keepAlive = () => room !== null;
 let wasOnline = true;
@@ -101,6 +137,8 @@ let chat: ChatMessage[] = [];
 let unread = 0;
 let chatOpen = false;
 let awaitingRoll = false;
+/** True while the dice is tumbling, so re-roll/pass only appear once you can see the number. */
+let rolling = false;
 let resultsShownFor = -1;
 let turnEndsAt: number | null = null;
 let queue: Promise<void> = Promise.resolve();
@@ -108,6 +146,7 @@ let queued = 0;
 
 const board = new Board($("board"), (token) => conn.send({ t: "move", token }));
 const dice = new Dice();
+dice.setSkin(mySkin);
 dice.el.addEventListener("click", () => rollDice());
 
 function mySeat(r: RoomView | null = room): SeatView | undefined {
@@ -174,7 +213,7 @@ async function apply(next: RoomView): Promise<void> {
   room = next;
   if (!prev) $("toasts").replaceChildren(); // e.g. the "enter your name" hint
   // Any roll result unlocks the dice, whether or not we animate it.
-  if (next.event === "roll" || !isMyTurn(next)) awaitingRoll = false;
+  if (next.event === "roll" || next.event === "reroll" || !isMyTurn(next)) awaitingRoll = false;
   // Skip animations if we've fallen behind (e.g. the tab was in the background).
   const animate = queued <= 2 && !document.hidden && !!prev && prev.seq < next.seq;
 
@@ -192,28 +231,43 @@ async function apply(next: RoomView): Promise<void> {
   renderPanels(next);
   setTimer(next);
 
-  if (animate && next.event === "roll" && g.lastRoll) {
+  if (animate && (next.event === "roll" || next.event === "reroll") && g.lastRoll) {
     const roller = seatOf(g.lastRoll.color, next);
-    setStatus(roller?.id === next.you ? "Rolling…" : `${roller?.name ?? "They"} rolled…`, roller?.id === next.you);
+    const mine = roller?.id === next.you;
+    if (next.event === "reroll") {
+      play("gem");
+      const p = panels.get(g.lastRoll.color);
+      if (p) sparkleGem(p);
+      if (!mine) toast(`${roller?.name ?? "They"} used a gem 💎`);
+    }
+    setStatus(mine ? "Rolling…" : `${roller?.name ?? "They"} rolled…`, mine);
     placeDice(g.lastRoll.color, false);
     play("roll");
     buzz(20);
+    rolling = true;
+    renderPanels(next);
     await dice.roll(g.lastRoll.value);
-    if (g.lastRoll.value === 6) play("six");
-    const who = seatOf(g.lastRoll.color, next);
-    const mine = who?.id === next.you;
-    if (g.lastRoll.outcome === "no-move") {
-      setStatus(mine ? `You rolled ${g.lastRoll.value} — no moves this time` : `${who?.name ?? "They"} rolled ${g.lastRoll.value} — no moves`);
-      await sleep(600);
-    } else if (g.lastRoll.outcome === "three-sixes") {
-      toast(`${mine ? "You" : who?.name} rolled three 6s — turn lost! 😬`, "error");
+    rolling = false;
+    if (g.lastRoll.outcome === "three-sixes") {
+      banner("3 SIXES 😬", "#ff5a6a");
+      toast(`${mine ? "You" : roller?.name} rolled three 6s — turn lost!`, "error");
+      await sleep(700);
+    } else if (g.lastRoll.value === 6) {
+      play("six");
+      banner("SIX! 🎲", PALETTE[g.lastRoll.color].main, true);
+    }
+    if (g.lastRoll.outcome === "no-move" && !(mine && g.phase === "move")) {
+      setStatus(mine ? `You rolled ${g.lastRoll.value} — no moves this time` : `${roller?.name ?? "They"} rolled ${g.lastRoll.value} — no moves`);
       await sleep(600);
     }
   } else if (animate && next.event === "move" && g.lastMove) {
     const mover = seatOf(g.lastMove.color, next);
     if (mover?.id !== next.you) setStatus(`${mover?.name ?? "They"} is moving…`);
     await board.animate(g.lastMove);
+    if (g.lastMove.to === FINISH) banner("HOME! 🏠", PALETTE[g.lastMove.color].main);
     if (g.lastMove.captures.length) {
+      banner("CAPTURED! 💥", PALETTE[g.lastMove.color].main);
+      shakeBoard();
       const by = seatOf(g.lastMove.color, next);
       for (const c of g.lastMove.captures) {
         const victim = seatOf(c.color, next);
@@ -255,7 +309,7 @@ function showScreen(id: ScreenId): void {
 // ---------- Home ----------
 $("create-btn").addEventListener("click", () => {
   const name = playerName();
-  if (name) conn.send({ t: "create", name, secret });
+  if (name) conn.send({ t: "create", name, secret, dice: mySkin });
 });
 
 $("join-form").addEventListener("submit", (e) => {
@@ -268,7 +322,7 @@ $("join-form").addEventListener("submit", (e) => {
     $("code-input").focus();
     return;
   }
-  conn.send({ t: "join", code, name, secret });
+  conn.send({ t: "join", code, name, secret, dice: mySkin });
 });
 
 $("code-input").addEventListener("input", (e) => {
@@ -289,7 +343,7 @@ $("bot-count").addEventListener("click", (e) => {
 
 $("bots-btn").addEventListener("click", () => {
   const name = playerName();
-  if (name) conn.send({ t: "create", name, secret, bots: botCount, start: true });
+  if (name) conn.send({ t: "create", name, secret, dice: mySkin, bots: botCount, start: true });
 });
 
 // ---------- Lobby ----------
@@ -349,9 +403,28 @@ function renderLobby(r: RoomView): void {
       : r.seats.length < MAX_PLAYERS
         ? "Ready when you are! You can still invite more players."
         : "The table is full — let's play!";
+
+  const opts: Record<string, boolean> = {
+    "opt-easy": r.options.easySixes,
+    "opt-quick": r.options.quickStart,
+    "opt-gems": r.options.gems > 0,
+  };
+  for (const [id, on] of Object.entries(opts)) {
+    const input = $<HTMLInputElement>(id);
+    input.checked = on;
+    input.disabled = !isHost;
+  }
+  $("options-hint").textContent = isHost ? "Tap to switch. You can change these until the game starts." : "Only the host can change the house rules.";
+  renderSkinPicker($("lobby-skins"));
 }
 
 $("start-btn").addEventListener("click", () => conn.send({ t: "start" }));
+
+$("opt-easy").addEventListener("change", (e) => conn.send({ t: "options", options: { easySixes: (e.target as HTMLInputElement).checked } }));
+$("opt-quick").addEventListener("change", (e) => conn.send({ t: "options", options: { quickStart: (e.target as HTMLInputElement).checked } }));
+$("opt-gems").addEventListener("change", (e) =>
+  conn.send({ t: "options", options: { gems: (e.target as HTMLInputElement).checked ? GEMS_PER_GAME : 0 } })
+);
 
 $("copy-code").addEventListener("click", async () => {
   if (!room) return;
@@ -404,10 +477,38 @@ function panelFor(color: Color): HTMLElement {
   const info = h("div", "pinfo");
   info.appendChild(h("div", "pname"));
   info.appendChild(h("div", "psub"));
-  info.appendChild(h("div", "pips"));
+  const meta = h("div", "pmeta");
+  meta.appendChild(h("div", "pips"));
+  meta.appendChild(h("span", "pgems"));
+  info.appendChild(meta);
   p.appendChild(info);
   p.appendChild(h("div", "dice-slot"));
+
+  // Only shown on your own panel, when it's your move.
+  const actions = h("div", "p-actions");
+  const gem = h("button", "gem-btn", "💎 Re-roll");
+  gem.type = "button";
+  gem.title = "Spend a gem to roll again (R)";
+  gem.addEventListener("click", (e) => {
+    e.stopPropagation();
+    reroll();
+  });
+  const pass = h("button", "pass-btn", "Pass");
+  pass.type = "button";
+  pass.title = "Pass your turn (P)";
+  pass.addEventListener("click", (e) => {
+    e.stopPropagation();
+    conn.send({ t: "pass" });
+    pass.disabled = true;
+  });
+  actions.append(gem, pass);
+  p.appendChild(actions);
+
   p.appendChild(h("div", "bubble"));
+  // Tap someone else's panel to throw a sticker at them.
+  p.addEventListener("click", () => {
+    if (!p!.classList.contains("me")) openTray(color);
+  });
   panels.set(color, p);
   return p;
 }
@@ -451,6 +552,23 @@ function renderPanels(r: RoomView): void {
     const home = g.tokens[color].filter((t) => t === FINISH).length;
     pips.replaceChildren(...[0, 1, 2, 3].map((i) => h("span", i < home ? "pip on" : "pip")));
     pips.setAttribute("aria-label", `${home} of 4 tokens home`);
+
+    const gems = p.querySelector<HTMLElement>(".pgems")!;
+    gems.textContent = `💎${g.gems[color]}`;
+    gems.title = `${g.gems[color]} gems left`;
+    gems.classList.toggle("hidden", g.options.gems === 0);
+    gems.classList.toggle("empty", g.gems[color] === 0);
+
+    const mine = seat?.id === r.you;
+    const myMove = mine && !rolling && r.status === "playing" && color === current && g.phase === "move";
+    const gemBtn = p.querySelector<HTMLButtonElement>(".gem-btn")!;
+    const passBtn = p.querySelector<HTMLButtonElement>(".pass-btn")!;
+    gemBtn.classList.toggle("hidden", !(myMove && canReroll(g)));
+    gemBtn.disabled = false;
+    gemBtn.textContent = `💎 Re-roll · ${g.gems[color]}`;
+    passBtn.classList.toggle("hidden", !(myMove && g.movable.length === 0));
+    passBtn.disabled = false;
+    p.classList.toggle("throwable", !mine && !!r.you);
   }
   for (const slot of document.querySelectorAll<HTMLElement>(".panel-slot")) {
     if (!used.has(slot.dataset.corner!)) slot.replaceChildren();
@@ -466,6 +584,17 @@ function placeDice(color: Color, ready: boolean): void {
   dice.el.classList.toggle("ready", ready && !awaitingRoll);
   dice.el.disabled = !ready || awaitingRoll;
   dice.el.style.setProperty("--c", PALETTE[color].main);
+  dice.setSkin(seatOf(color)?.dice ?? "classic");
+}
+
+/** Spend a gem to roll again. */
+function reroll(): void {
+  const g = room?.game;
+  if (!room || !g || !isMyTurn() || !canReroll(g) || awaitingRoll) return;
+  unlockAudio();
+  awaitingRoll = true;
+  for (const b of document.querySelectorAll<HTMLButtonElement>(".gem-btn, .pass-btn")) b.disabled = true;
+  conn.send({ t: "reroll" });
 }
 
 function rollDice(): void {
@@ -498,14 +627,95 @@ function renderStatus(r: RoomView): void {
   const seat = seatOf(color, r);
   if (isMyTurn(r)) {
     if (g.phase === "roll") setStatus(g.sixes ? "🎉 Rolled a 6 — roll again!" : "Your turn — tap the dice 🎲", true);
-    else setStatus(onlyOneChoice(g) ? "Moving…" : "Pick a token to move ✨", true);
+    else if (!g.movable.length) setStatus(`No moves with a ${g.dice} — 💎 re-roll or pass`, true);
+    else setStatus(onlyOneChoice(g) ? "Moving…" : canReroll(g) ? "Pick a token — or 💎 re-roll" : "Pick a token to move ✨", true);
     return;
   }
   const name = seat?.name ?? COLOR_NAMES[color];
   if (seat?.bot || seat?.left) setStatus(`${name} is thinking…`);
   else if (seat && !seat.connected) setStatus(`${name} is offline — playing for them shortly…`);
+  else if (g.phase === "move" && !g.movable.length) setStatus(`${name} has no moves — deciding whether to use a gem…`);
   else setStatus(g.phase === "roll" ? `Waiting for ${name} to roll…` : `${name} is choosing a move…`);
 }
+
+// ---------- Banners & effects ----------
+let bannerTimer: ReturnType<typeof setTimeout> | undefined;
+function banner(text: string, color: string, small = false): void {
+  const b = $("banner");
+  b.textContent = text;
+  b.style.setProperty("--c", color);
+  b.classList.toggle("small", small);
+  b.classList.remove("show");
+  void b.offsetWidth;
+  b.classList.add("show");
+  clearTimeout(bannerTimer);
+  bannerTimer = setTimeout(() => b.classList.remove("show"), 1400);
+}
+
+function shakeBoard(): void {
+  const w = $("board-wrap");
+  w.classList.remove("shake");
+  void w.offsetWidth;
+  w.classList.add("shake");
+  setTimeout(() => w.classList.remove("shake"), 600);
+}
+
+function sparkleGem(panel: HTMLElement): void {
+  const g = panel.querySelector<HTMLElement>(".pgems");
+  if (!g) return;
+  g.classList.remove("spend");
+  void g.offsetWidth;
+  g.classList.add("spend");
+}
+
+// ---------- Sticker tray ----------
+let trayTarget: string | null = null;
+
+for (const [id, s] of Object.entries(STICKERS)) {
+  const b = h("button", "tray-btn");
+  b.type = "button";
+  b.append(h("span", "tray-emoji", s.emoji), h("span", "tray-label", s.label));
+  b.addEventListener("click", () => {
+    unlockAudio();
+    if (trayTarget) conn.send({ t: "sticker", sticker: id, to: trayTarget });
+    closeTray();
+  });
+  $("tray-grid").appendChild(b);
+}
+
+function openTray(color: Color): void {
+  const seat = seatOf(color);
+  if (!room?.you || !seat || seat.id === room.you) return;
+  trayTarget = seat.id;
+  $("tray-target").textContent = seat.name;
+  const tray = $("sticker-tray");
+  tray.classList.remove("hidden");
+  const r = panels.get(color)!.getBoundingClientRect();
+  const w = tray.offsetWidth;
+  const ht = tray.offsetHeight;
+  tray.style.left = `${Math.max(8, Math.min(innerWidth - w - 8, r.left + r.width / 2 - w / 2))}px`;
+  tray.style.top = `${r.bottom + ht + 12 < innerHeight ? r.bottom + 8 : Math.max(8, r.top - ht - 8)}px`;
+  tray.querySelector<HTMLElement>(".tray-btn")?.focus({ preventScroll: true });
+}
+
+function closeTray(): void {
+  trayTarget = null;
+  $("sticker-tray").classList.add("hidden");
+}
+
+document.addEventListener("pointerdown", (e) => {
+  const t = e.target as HTMLElement;
+  if (trayTarget && !t.closest("#sticker-tray, .panel")) closeTray();
+});
+
+$("gift-btn").addEventListener("click", () => {
+  const others = room?.seats.filter((s) => s.id !== room!.you && room!.game?.colors.includes(s.color)) ?? [];
+  if (others.length === 1) return openTray(others[0].color);
+  toast("Tap a player to throw a sticker at them 🎯");
+  const t = $("table");
+  t.classList.add("pick-target");
+  setTimeout(() => t.classList.remove("pick-target"), 2500);
+});
 
 // Countdown ring around the current player's avatar.
 function setTimer(r: RoomView): void {
@@ -610,6 +820,18 @@ function onChat(msg: ChatMessage): void {
   chat.push(msg);
   chat = chat.slice(-50);
   renderChat();
+
+  if (msg.sticker && msg.to) {
+    const from = room?.seats.find((s) => s.id === msg.seat);
+    const to = room?.seats.find((s) => s.id === msg.to);
+    const fromPanel = from && panels.get(from.color);
+    const toPanel = to && panels.get(to.color);
+    if (fromPanel?.isConnected && toPanel?.isConnected && document.body.dataset.screen === "game") {
+      void throwSticker(msg.sticker, fromPanel, toPanel);
+    }
+    if (to?.id === room?.you && from) toast(`${from.name} threw ${STICKERS[msg.sticker].emoji} at you!`);
+    return;
+  }
   const mine = msg.seat === room?.you;
   if (!chatOpen && !mine) {
     unread++;
@@ -640,7 +862,12 @@ function renderChat(): void {
     const li = h("li", `chat-msg${m.seat === room?.you ? " mine" : ""}`);
     li.style.setProperty("--c", PALETTE[m.color].main);
     li.appendChild(h("span", "chat-name", m.name));
-    li.appendChild(h("span", m.emoji ? "chat-text emoji" : "chat-text", m.emoji ?? m.text));
+    if (m.sticker) {
+      const target = room?.seats.find((s) => s.id === m.to)?.name ?? "someone";
+      li.appendChild(h("span", "chat-text", `threw ${STICKERS[m.sticker as StickerId].emoji} ${STICKERS[m.sticker as StickerId].label.toLowerCase()} at ${target}`));
+    } else {
+      li.appendChild(h("span", m.emoji ? "chat-text emoji" : "chat-text", m.emoji ?? m.text));
+    }
     log.appendChild(li);
   }
   log.scrollTop = log.scrollHeight;
@@ -687,7 +914,8 @@ $("chat-form").addEventListener("submit", (e) => {
 // ---------- Keyboard ----------
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
-    if (!$("confirm").classList.contains("hidden")) closeModal("confirm");
+    if (trayTarget) closeTray();
+    else if (!$("confirm").classList.contains("hidden")) closeModal("confirm");
     else if (chatOpen) closeChat();
     return;
   }
@@ -697,6 +925,10 @@ document.addEventListener("keydown", (e) => {
   if ((e.key === " " || e.key === "Enter") && g.phase === "roll" && isMyTurn()) {
     e.preventDefault();
     rollDice();
+  } else if (e.key.toLowerCase() === "r" && g.phase === "move" && isMyTurn()) {
+    reroll();
+  } else if (e.key.toLowerCase() === "p" && g.phase === "move" && isMyTurn() && !g.movable.length) {
+    conn.send({ t: "pass" });
   } else if (/^[1-4]$/.test(e.key) && g.phase === "move" && isMyTurn()) {
     const token = Number(e.key) - 1;
     if (g.movable.includes(token)) conn.send({ t: "move", token });
@@ -706,6 +938,7 @@ document.addEventListener("keydown", (e) => {
 // Audio can only start after a user gesture.
 document.addEventListener("pointerdown", unlockAudio, { once: true });
 
+renderSkinPicker($("home-skins"));
 showScreen("home");
 if (inviteCode) {
   toast(`Joining room ${inviteCode} — enter your name and tap Join`, "info", 4000);

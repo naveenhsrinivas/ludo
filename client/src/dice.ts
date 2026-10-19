@@ -1,4 +1,5 @@
-// A 3D CSS dice that tumbles and lands on a value.
+// A 3D CSS dice that tumbles and lands on a value, in several skins.
+import type { DiceSkin } from "../../shared/protocol.js";
 
 // Which of the 9 pip slots (3×3, row by row) are filled for each value.
 const PIPS: Record<number, number[]> = {
@@ -29,6 +30,26 @@ const FACE: Record<number, string> = {
   6: "rotateY(180deg)",
 };
 
+function makeFace(value: number): HTMLDivElement {
+  const face = document.createElement("div");
+  face.className = `face f${value}`;
+  for (let i = 0; i < 9; i++) {
+    const pip = document.createElement("span");
+    if (PIPS[value].includes(i)) pip.className = "pip";
+    face.appendChild(pip);
+  }
+  return face;
+}
+
+/** A flat, single-face dice for previews (e.g. the skin picker). */
+export function miniDice(skin: DiceSkin, value = 5): HTMLElement {
+  const d = document.createElement("span");
+  d.className = "mini-dice";
+  d.dataset.skin = skin;
+  d.appendChild(makeFace(value));
+  return d;
+}
+
 export class Dice {
   readonly el: HTMLButtonElement;
   private cube: HTMLDivElement;
@@ -42,18 +63,16 @@ export class Dice {
     this.cube = document.createElement("div");
     this.cube.className = "cube";
     for (let v = 1; v <= 6; v++) {
-      const face = document.createElement("div");
-      face.className = "face";
+      const face = makeFace(v);
       face.style.transform = `${FACE[v]} translateZ(calc(var(--dice) / 2))`;
-      for (let i = 0; i < 9; i++) {
-        const pip = document.createElement("span");
-        if (PIPS[v].includes(i)) pip.className = "pip";
-        face.appendChild(pip);
-      }
       this.cube.appendChild(face);
     }
     this.el.appendChild(this.cube);
     this.show(6);
+  }
+
+  setSkin(skin: DiceSkin): void {
+    this.el.dataset.skin = skin;
   }
 
   show(value: number): void {

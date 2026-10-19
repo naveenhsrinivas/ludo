@@ -1,11 +1,24 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { BASE, FINISH, HOME_COLUMN, SAFE_SQUARES, START, TRACK, trackSquare, type Color } from "./board.js";
-import { chooseMove } from "./bot.js";
-import { applyMove, applyRoll, currentColor, newGame, type GameState } from "./rules.js";
+import { chooseMove, wantsReroll } from "./bot.js";
+import {
+  applyMove,
+  applyPass,
+  applyReroll,
+  applyRoll,
+  canReroll,
+  currentColor,
+  DEFAULT_OPTIONS,
+  EASY_SIX_GUARANTEE,
+  newGame,
+  rollValue,
+  type GameState,
+} from "./rules.js";
 
+/** A game with gems off, so a roll with no moves passes the turn straight away. */
 function game(colors: Color[] = ["red", "yellow"]): GameState {
-  return newGame(colors);
+  return newGame(colors, { ...DEFAULT_OPTIONS, gems: 0 });
 }
 
 test("board has 52 distinct track squares and well-placed starts", () => {
@@ -109,7 +122,9 @@ test("600 computer-only games always finish and never break the rules", () => {
     let actions = 0;
     while (g.phase !== "over") {
       assert.ok(++actions < 20_000, "game should finish");
-      if (g.phase === "roll") applyRoll(g, 1 + Math.floor(Math.random() * 6));
+      if (g.phase === "roll") applyRoll(g, rollValue(g));
+      else if (wantsReroll(g)) applyReroll(g, rollValue(g));
+      else if (!g.movable.length) applyPass(g);
       else applyMove(g, chooseMove(g));
 
       // Invariants: progress in range, and no two colours share an unsafe track square.
@@ -128,4 +143,83 @@ test("600 computer-only games always finish and never break the rules", () => {
     assert.equal(g.ranking.length, colors.length);
     assert.equal(new Set(g.ranking).size, colors.length);
   }
+});
+
+test("easy sixes: a 6 is likelier while stuck in base, and guaranteed by the third roll", () => {
+  const g = newGame(["red", "yellow"]);
+  let sixes = 0;
+  const N = 20_000;
+  for (let i = 0; i < N; i++) if (rollValue(g) === 6) sixes++;
+  assert.ok(sixes / N > 0.35 && sixes / N < 0.45, `six rate ${sixes / N}`);
+
+  // Two misses in a row, then the next roll must be a 6.
+  const h = game();
+  applyRoll(h, 3); // red misses, turn passes
+  applyRoll(h, 2); // yellow
+  applyRoll(h, 4); // red misses again
+  applyRoll(h, 1); // yellow
+  assert.equal(h.stuck.red, EASY_SIX_GUARANTEE);
+  assert.equal(rollValue(h, () => 0.99), 6);
+  applyRoll(h, 6);
+  assert.equal(h.stuck.red, 0);
+});
+
+test("easy sixes only applies while every token is in base; normal dice otherwise", () => {
+  const g = newGame(["red", "yellow"]);
+  g.tokens.red = [10, BASE, BASE, BASE];
+  let sixes = 0;
+  for (let i = 0; i < 12_000; i++) if (rollValue(g) === 6) sixes++;
+  assert.ok(Math.abs(sixes / 12_000 - 1 / 6) < 0.025, `six rate ${sixes / 12_000}`);
+
+  const off = newGame(["red", "yellow"], { ...DEFAULT_OPTIONS, easySixes: false });
+  sixes = 0;
+  for (let i = 0; i < 12_000; i++) if (rollValue(off) === 6) sixes++;
+  assert.ok(Math.abs(sixes / 12_000 - 1 / 6) < 0.025);
+});
+
+test("quick start puts one token of each colour on its start square", () => {
+  const g = newGame(["red", "green", "yellow"], { ...DEFAULT_OPTIONS, quickStart: true });
+  for (const c of g.colors) assert.deepEqual(g.tokens[c], [0, BASE, BASE, BASE]);
+});
+
+test("gems: re-roll a roll you don't like, or after a roll with no moves", () => {
+  const g = newGame(["red", "yellow"]);
+  assert.equal(g.gems.red, 5);
+
+  // No moves, but gems left: the player gets to choose instead of losing the turn.
+  assert.equal(applyRoll(g, 3).outcome, "no-move");
+  assert.equal(currentColor(g), "red");
+  assert.ok(canReroll(g));
+  applyReroll(g, 6);
+  assert.equal(g.gems.red, 4);
+  assert.deepEqual(g.movable, [0, 1, 2, 3]);
+
+  // Re-roll a legal but unwanted roll.
+  applyMove(g, 0);
+  applyRoll(g, 1);
+  applyReroll(g, 5);
+  assert.equal(g.gems.red, 3);
+  assert.equal(g.dice, 5);
+  applyMove(g, 0);
+  assert.equal(currentColor(g), "yellow");
+
+  // Passing after a no-move roll hands the turn on.
+  applyRoll(g, 2);
+  applyPass(g);
+  assert.equal(currentColor(g), "red");
+});
+
+test("gems run out, and a re-rolled six doesn't count towards three sixes", () => {
+  const g = newGame(["red", "yellow"], { ...DEFAULT_OPTIONS, gems: 1 });
+  g.tokens.red = [5, BASE, BASE, BASE];
+  applyRoll(g, 6);
+  applyMove(g, 0);
+  applyRoll(g, 6);
+  applyReroll(g, 6); // still only two sixes in a row
+  assert.equal(g.sixes, 2);
+  assert.equal(g.gems.red, 0);
+  assert.ok(!canReroll(g));
+  assert.throws(() => applyReroll(g, 3));
+  applyMove(g, 0);
+  assert.equal(applyRoll(g, 4).outcome, "move");
 });

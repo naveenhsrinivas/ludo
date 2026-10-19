@@ -5,7 +5,7 @@ import { extname, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { ClientMessage, ServerMessage } from "../shared/protocol.js";
-import { cleanName, Room, type Seat } from "./room.js";
+import { cleanName, cleanSkin, Room, type Seat } from "./room.js";
 
 const PORT = Number(process.env.PORT) || 8787;
 const MAX_ROOMS = 1000;
@@ -120,7 +120,7 @@ function handle(ws: WebSocket, conn: Conn, msg: ClientMessage): string | void {
       if (rooms.size >= MAX_ROOMS) return "The server is busy. Please try again later.";
       const room = new Room(newCode());
       rooms.set(room.code, room);
-      seatIn(ws, conn, room, room.join(ws, cleanName(msg.name), msg.secret));
+      seatIn(ws, conn, room, room.join(ws, cleanName(msg.name), msg.secret, cleanSkin(msg.dice)));
       const bots = Math.min(3, Math.max(0, Number(msg.bots) || 0));
       for (let i = 0; i < bots && conn.seat; i++) room.addBot(conn.seat);
       if (msg.start && conn.seat) return room.start(conn.seat);
@@ -131,7 +131,7 @@ function handle(ws: WebSocket, conn: Conn, msg: ClientMessage): string | void {
       const code = typeof msg.code === "string" ? msg.code.trim().toUpperCase() : "";
       const room = rooms.get(code);
       if (!room) return "No game found with that code. Check it and try again.";
-      seatIn(ws, conn, room, room.join(ws, cleanName(msg.name), msg.secret));
+      seatIn(ws, conn, room, room.join(ws, cleanName(msg.name), msg.secret, cleanSkin(msg.dice)));
       return;
     }
   }
@@ -147,12 +147,22 @@ function handle(ws: WebSocket, conn: Conn, msg: ClientMessage): string | void {
       return room.start(seat);
     case "roll":
       return room.roll(seat);
+    case "reroll":
+      return room.reroll(seat);
+    case "pass":
+      return room.pass(seat);
     case "move":
       return Number.isInteger(msg.token) ? room.move(seat, msg.token) : undefined;
     case "chat":
       return room.chatMessage(seat, msg.text, undefined);
     case "emoji":
       return room.chatMessage(seat, undefined, msg.emoji);
+    case "sticker":
+      return room.sticker(seat, msg.sticker, msg.to);
+    case "dice":
+      return room.setDice(seat, msg.skin);
+    case "options":
+      return room.setOptions(seat, msg.options);
     case "again":
       return room.again(seat);
     case "leave":

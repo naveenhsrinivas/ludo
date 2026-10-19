@@ -68,7 +68,9 @@ function noise(start: number, dur: number, gain = 0.25, freq = 1800): void {
   src.start(t);
 }
 
-export type Sound = "roll" | "step" | "capture" | "home" | "six" | "turn" | "win" | "pop" | "out";
+export type Sound =
+  | "roll" | "step" | "capture" | "home" | "six" | "turn" | "win" | "pop" | "out"
+  | "gem" | "boom" | "splat" | "sparkle" | "kiss" | "crack" | "crown" | "cluck" | "whoosh";
 
 export function play(sound: Sound): void {
   if (!enabled || !ctx || ctx.state !== "running") return;
@@ -100,6 +102,37 @@ export function play(sound: Sound): void {
       break;
     case "pop":
       tone(900, 0, 0.08, "sine", 0.1, 1400);
+      break;
+    case "gem":
+      [1319, 1568, 2093].forEach((f, i) => tone(f, i * 0.06, 0.25, "sine", 0.1));
+      break;
+    case "whoosh":
+      noise(0, 0.35, 0.12, 900);
+      break;
+    case "boom":
+      tone(140, 0, 0.6, "sawtooth", 0.25, 40);
+      noise(0, 0.5, 0.45, 300);
+      break;
+    case "splat":
+      noise(0, 0.18, 0.4, 500);
+      tone(220, 0, 0.15, "square", 0.06, 90);
+      break;
+    case "sparkle":
+      for (let i = 0; i < 6; i++) tone(1500 + Math.random() * 1500, i * 0.05, 0.12, "sine", 0.07);
+      break;
+    case "kiss":
+      tone(700, 0, 0.12, "sine", 0.14, 1600);
+      noise(0.08, 0.05, 0.15, 3000);
+      break;
+    case "crack":
+      noise(0, 0.06, 0.4, 2500);
+      noise(0.07, 0.12, 0.25, 900);
+      break;
+    case "crown":
+      [784, 988, 1175, 1568].forEach((f, i) => tone(f, i * 0.08, 0.25, "triangle", 0.12));
+      break;
+    case "cluck":
+      [0, 0.16, 0.32].forEach((t, i) => tone(i === 2 ? 900 : 600, t, 0.1, "square", 0.07, i === 2 ? 1300 : 450));
       break;
     case "win":
       [523, 659, 784, 1047, 784, 1047, 1319].forEach((f, i) => tone(f, i * 0.12, 0.3, "triangle", 0.13));

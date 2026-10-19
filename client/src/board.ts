@@ -21,11 +21,14 @@ import { play } from "./sound.js";
 const NS = "http://www.w3.org/2000/svg";
 
 export const PALETTE: Record<Color, { main: string; dark: string; light: string }> = {
-  red: { main: "#ef4452", dark: "#b8202f", light: "#ffd9dd" },
-  green: { main: "#22b573", dark: "#13804f", light: "#cff5e2" },
-  yellow: { main: "#ffc51f", dark: "#c98f00", light: "#fff1c4" },
-  blue: { main: "#3d7bfa", dark: "#1f4fc4", light: "#d8e5ff" },
+  red: { main: "#ff3d57", dark: "#c0143a", light: "#ffe0e5" },
+  green: { main: "#16c172", dark: "#0b8a4f", light: "#d5f6e5" },
+  yellow: { main: "#ffc414", dark: "#cf8d00", light: "#fff2c7" },
+  blue: { main: "#2f80ff", dark: "#1752c4", light: "#d9e7ff" },
 };
+
+/** Outline colour for the grid, rim and pieces. */
+const INK = "#1d1645";
 
 const STEP_MS = 140;
 const STAR = "M0,-0.34 L0.1,-0.11 0.33,-0.1 0.15,0.05 0.21,0.28 0,0.15 -0.21,0.28 -0.15,0.05 -0.33,-0.1 -0.1,-0.11Z";
@@ -91,70 +94,71 @@ export class Board {
   // ---------- Static board ----------
   private drawDefs(): void {
     const defs = el("defs", {}, this.svg);
-    for (const c of COLORS) {
-      const p = PALETTE[c];
-      const g = el("radialGradient", { id: `tok-${c}`, cx: "35%", cy: "30%", r: "75%" }, defs);
-      el("stop", { offset: "0%", "stop-color": "#fff", "stop-opacity": 0.9 }, g);
-      el("stop", { offset: "22%", "stop-color": p.main }, g);
-      el("stop", { offset: "100%", "stop-color": p.dark }, g);
-
-      const b = el("linearGradient", { id: `base-${c}`, x1: 0, y1: 0, x2: 1, y2: 1 }, defs);
-      el("stop", { offset: "0%", "stop-color": p.main }, b);
-      el("stop", { offset: "100%", "stop-color": p.dark }, b);
-    }
+    // Soft shadow under each token.
     const shadow = el("filter", { id: "lift", x: "-50%", y: "-50%", width: "200%", height: "200%" }, defs);
-    el("feDropShadow", { dx: 0, dy: 0.08, stdDeviation: 0.08, "flood-color": "#000", "flood-opacity": 0.35 }, shadow);
+    el("feDropShadow", { dx: 0, dy: 0.06, stdDeviation: 0.05, "flood-color": INK, "flood-opacity": 0.45 }, shadow);
   }
 
   private drawBoard(): void {
     const w = this.world;
-    el("rect", { x: -0.15, y: -0.15, width: 15.3, height: 15.3, rx: 0.7, class: "board-frame" }, w);
-    el("rect", { x: 0, y: 0, width: 15, height: 15, rx: 0.55, class: "board-bg" }, w);
+    const line = { stroke: INK, "stroke-width": 0.06, "stroke-linejoin": "round" };
 
-    // Bases
-    for (const c of COLORS) {
-      const [bx, by] = BASE_ORIGIN[c];
-      el("rect", { x: bx, y: by, width: 6, height: 6, rx: 0.55, fill: `url(#base-${c})` }, w);
-      el("rect", { x: bx + 0.8, y: by + 0.8, width: 4.4, height: 4.4, rx: 0.6, class: "base-inner" }, w);
-      for (const [x, y] of baseSpots(c)) {
-        el("circle", { cx: x, cy: y, r: 0.62, fill: PALETTE[c].light, stroke: PALETTE[c].main, "stroke-width": 0.08 }, w);
-      }
-    }
+    // Solid rim and white playing surface.
+    el("rect", { x: -0.3, y: -0.3, width: 15.6, height: 15.6, rx: 0.9, fill: INK }, w);
+    el("rect", { x: 0, y: 0, width: 15, height: 15, rx: 0.5, fill: "#fff" }, w);
 
-    // Shared track
+    // Shared track: white squares, stars on the safe ones.
     TRACK.forEach(([col, row], i) => {
       const start = COLORS.find((c) => START[c] === i);
-      el("rect", { x: col, y: row, width: 1, height: 1, class: "cell", fill: start ? PALETTE[start].main : "#fff" }, w);
+      el("rect", { x: col, y: row, width: 1, height: 1, fill: start ? PALETTE[start].main : "#fff", ...line }, w);
       if (SAFE_SQUARES.has(i)) {
-        el("path", { d: STAR, transform: `translate(${col + 0.5} ${row + 0.5})`, class: start ? "star on-color" : "star" }, w);
+        el("path", {
+          d: STAR,
+          transform: `translate(${col + 0.5} ${row + 0.5}) scale(1.15)`,
+          fill: start ? "#fff" : INK,
+          "fill-opacity": start ? 1 : 0.22,
+        }, w);
       }
     });
 
-    // Home columns, and an arrow where each colour turns in.
+    // Home columns, and a bold arrow where each colour turns in.
     for (const c of COLORS) {
       for (const [col, row] of HOME_COLUMN[c]) {
-        el("rect", { x: col, y: row, width: 1, height: 1, class: "cell", fill: PALETTE[c].main }, w);
+        el("rect", { x: col, y: row, width: 1, height: 1, fill: PALETTE[c].main, ...line }, w);
       }
       const [ec, er] = TRACK[trackSquare(c, LAST_TRACK)!];
       const [hc, hr] = HOME_COLUMN[c][0];
       const angle = (Math.atan2(hr - er, hc - ec) * 180) / Math.PI;
       el("path", {
-        d: "M-0.22,-0.2 L0.18,0 L-0.22,0.2 Z",
+        d: "M-0.24,-0.26 L0.2,0 L-0.24,0.26 L-0.1,0 Z",
         transform: `translate(${ec + 0.5} ${er + 0.5}) rotate(${angle})`,
         fill: PALETTE[c].main,
-        opacity: 0.85,
+        stroke: INK,
+        "stroke-width": 0.04,
+        "stroke-linejoin": "round",
       }, w);
     }
 
-    // Centre triangles
+    // Bases: a bold coloured square with a white yard and four token pads.
+    for (const c of COLORS) {
+      const [bx, by] = BASE_ORIGIN[c];
+      el("rect", { x: bx, y: by, width: 6, height: 6, rx: 0.5, fill: PALETTE[c].main, ...line }, w);
+      el("rect", { x: bx + 0.85, y: by + 0.85, width: 4.3, height: 4.3, rx: 0.8, fill: "#fff", ...line }, w);
+      for (const [x, y] of baseSpots(c)) {
+        el("circle", { cx: x, cy: y, r: 0.66, fill: PALETTE[c].light, stroke: PALETTE[c].main, "stroke-width": 0.14 }, w);
+      }
+    }
+
+    // Centre: four triangles meeting at a home badge.
     const tri: Record<Color, string> = {
       red: "6,6 6,9 7.5,7.5",
       green: "6,6 9,6 7.5,7.5",
       yellow: "9,6 9,9 7.5,7.5",
       blue: "6,9 9,9 7.5,7.5",
     };
-    for (const c of COLORS) el("polygon", { points: tri[c], fill: `url(#base-${c})`, class: "centre" }, w);
-    el("circle", { cx: 7.5, cy: 7.5, r: 0.42, class: "centre-dot" }, w);
+    for (const c of COLORS) el("polygon", { points: tri[c], fill: PALETTE[c].main, ...line }, w);
+    el("circle", { cx: 7.5, cy: 7.5, r: 0.55, fill: "#fff", ...line }, w);
+    el("path", { d: STAR, transform: "translate(7.5 7.5) scale(1.05)", fill: INK }, w);
   }
 
   // ---------- Tokens ----------
@@ -162,13 +166,17 @@ export class Board {
     const key = `${color}${i}`;
     let g = this.tokens.get(key);
     if (g) return g;
+    const p = PALETTE[color];
     g = el("g", { class: `token ${color}`, "data-color": color, "data-token": i });
     const body = el("g", { class: "token-body" }, g);
     el("circle", { r: 0.62, class: "token-hit" }, body);
-    el("circle", { r: 0.5, class: "token-ring", stroke: PALETTE[color].main }, body);
-    el("ellipse", { cx: 0, cy: 0.16, rx: 0.33, ry: 0.15, class: "token-shadow" }, body);
-    el("circle", { r: 0.36, fill: `url(#tok-${color})`, stroke: "#fff", "stroke-width": 0.07, filter: "url(#lift)" }, body);
-    el("circle", { r: 0.15, fill: "none", stroke: "rgba(255,255,255,.75)", "stroke-width": 0.05 }, body);
+    el("circle", { r: 0.56, class: "token-ring", stroke: p.main }, body);
+    // A classic flat pawn: coloured disc, white ring, dark core and a little shine.
+    const piece = el("g", { filter: "url(#lift)" }, body);
+    el("circle", { r: 0.42, fill: p.main, stroke: INK, "stroke-width": 0.07 }, piece);
+    el("circle", { r: 0.27, fill: "none", stroke: "#fff", "stroke-width": 0.1 }, piece);
+    el("circle", { r: 0.13, fill: p.dark }, piece);
+    el("ellipse", { cx: -0.13, cy: -0.18, rx: 0.13, ry: 0.07, fill: "#fff", "fill-opacity": 0.55, transform: "rotate(-30 -0.13 -0.18)" }, piece);
     g.addEventListener("click", () => this.pick(color, i));
     g.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {

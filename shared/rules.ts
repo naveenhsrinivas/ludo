@@ -21,7 +21,30 @@ export interface RollRecord {
   outcome: "move" | "no-move" | "three-sixes";
 }
 
+/** House rules, chosen by the host before the game. */
+export interface GameOptions {
+  /** While all your tokens are in base, 6s come up more often (and by the third roll at the latest). */
+  easySixes: boolean;
+  /** Everyone starts with one token already out of base. */
+  quickStart: boolean;
+  /** Gems each player gets per game; one gem buys a re-roll. 0 turns gems off. */
+  gems: number;
+}
+
+export const GEMS_PER_GAME = 5;
+export const DEFAULT_OPTIONS: GameOptions = { easySixes: true, quickStart: false, gems: GEMS_PER_GAME };
+
+/** Chance of a 6 while waiting to leave base, with easySixes on (normally 1 in 6). */
+export const EASY_SIX_CHANCE = 0.4;
+/** With easySixes on, after this many misses in a row the next roll is a 6. */
+export const EASY_SIX_GUARANTEE = 2;
+
 export interface GameState {
+  options: GameOptions;
+  /** Rolls in a row without a 6 while stuck in base (for easySixes). */
+  stuck: Record<Color, number>;
+  /** Gems left per player. */
+  gems: Record<Color, number>;
   /** Colours in play, in turn order. */
   colors: Color[];
   /** Progress of each colour's four tokens (see board.ts). */
@@ -32,7 +55,8 @@ export interface GameState {
   dice: number | null;
   /** Sixes rolled in a row this turn. */
   sixes: number;
-  /** Tokens that can move with the current dice. */
+  /** Tokens that can move with the current dice. Empty in the "move" phase means
+   *  no move is possible, but the player may spend a gem to re-roll (or pass). */
   movable: number[];
   /** Colours in the order they finished. */
   ranking: Color[];
@@ -40,10 +64,19 @@ export interface GameState {
   lastMove: MoveRecord | null;
 }
 
-export function newGame(colors: Color[]): GameState {
+export function newGame(colors: Color[], options: GameOptions = DEFAULT_OPTIONS): GameState {
   const tokens = {} as Record<Color, number[]>;
-  for (const c of colors) tokens[c] = [BASE, BASE, BASE, BASE];
+  const stuck = {} as Record<Color, number>;
+  const gems = {} as Record<Color, number>;
+  for (const c of colors) {
+    tokens[c] = [options.quickStart ? 0 : BASE, BASE, BASE, BASE];
+    stuck[c] = 0;
+    gems[c] = options.gems;
+  }
   return {
+    options: { ...options },
+    stuck,
+    gems,
     colors,
     tokens,
     turn: 0,
@@ -105,10 +138,27 @@ function nextTurn(g: GameState): void {
   }
 }
 
+/** True when a player can only move by rolling a 6 (no tokens out on the board). */
+export function waitingForSix(g: GameState, color: Color): boolean {
+  const t = g.tokens[color];
+  return t.includes(BASE) && t.every((p) => p === BASE || p === FINISH);
+}
+
+/** Roll the dice for the current player, applying the easy-sixes rule. `random` returns [0, 1). */
+export function rollValue(g: GameState, random: () => number = Math.random): number {
+  const color = currentColor(g);
+  if (g.options.easySixes && waitingForSix(g, color)) {
+    if (g.stuck[color] >= EASY_SIX_GUARANTEE || random() < EASY_SIX_CHANCE) return 6;
+    return 1 + Math.floor(random() * 5);
+  }
+  return 1 + Math.floor(random() * 6);
+}
+
 /** Apply a dice roll for the current player. Mutates `g`. */
 export function applyRoll(g: GameState, value: number): RollRecord {
   if (g.phase !== "roll") throw new Error("Not time to roll");
   const color = currentColor(g);
+  g.stuck[color] = waitingForSix(g, color) && value !== 6 ? g.stuck[color] + 1 : 0;
   g.dice = value;
   g.sixes = value === 6 ? g.sixes + 1 : 0;
   g.lastMove = null;
@@ -124,11 +174,35 @@ export function applyRoll(g: GameState, value: number): RollRecord {
       g.phase = "move";
     } else {
       outcome = "no-move";
-      nextTurn(g);
+      // With gems left, the player gets to choose: re-roll or pass.
+      if (g.gems[color] > 0) g.phase = "move";
+      else nextTurn(g);
     }
   }
   g.lastRoll = { color, value, outcome };
   return g.lastRoll;
+}
+
+/** Whether the current player can spend a gem to roll again right now. */
+export function canReroll(g: GameState): boolean {
+  return g.phase === "move" && g.gems[currentColor(g)] > 0;
+}
+
+/** Spend a gem and roll again, replacing the current roll. Mutates `g`. */
+export function applyReroll(g: GameState, value: number): RollRecord {
+  if (!canReroll(g)) throw new Error("Can't re-roll now");
+  const color = currentColor(g);
+  g.gems[color]--;
+  if (g.dice === 6) g.sixes--; // the replaced six doesn't count towards three in a row
+  g.phase = "roll";
+  g.movable = [];
+  return applyRoll(g, value);
+}
+
+/** Give up the turn after a roll with no possible move. Mutates `g`. */
+export function applyPass(g: GameState): void {
+  if (g.phase !== "move" || g.movable.length) throw new Error("Can't pass now");
+  nextTurn(g);
 }
 
 /** Move one of the current player's tokens by the rolled amount. Mutates `g`. */

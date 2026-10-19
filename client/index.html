@@ -27,6 +27,8 @@
     <section class="card name-card">
       <label for="name-input" class="field-label">Your name</label>
       <input id="name-input" class="text-input" maxlength="16" autocomplete="nickname" placeholder="Enter your name" spellcheck="false">
+      <p class="field-label skin-label">Your dice</p>
+      <div class="skin-picker" id="home-skins" role="radiogroup" aria-label="Dice style"></div>
     </section>
 
     <div class="mode-grid">
@@ -68,6 +70,9 @@
         <li>Land on an opponent to send them back to base. <b>⭐ Stars</b> and start squares are safe.</li>
         <li>Rolling a 6, capturing, or getting a token home earns another roll — but three 6s in a row lose your turn.</li>
         <li>You need the exact number to reach home. First to get all four tokens home wins!</li>
+        <li><b>🎯 Easy sixes:</b> while all your tokens are at home, 6s come much more often — you'll be out within 3 rolls.</li>
+        <li><b>💎 Gems:</b> you get 5 per game. Don't like your roll? Spend a gem to roll again.</li>
+        <li><b>🎁 Stickers:</b> tap another player to throw a rose, a bomb, a tomato and more!</li>
       </ul>
     </details>
   </main>
@@ -91,6 +96,31 @@
 
     <section class="seats" id="seats"></section>
 
+    <section class="card options-card">
+      <p class="field-label">House rules</p>
+      <label class="switch-row">
+        <input type="checkbox" id="opt-easy">
+        <span class="switch" aria-hidden="true"></span>
+        <span class="switch-text"><b>🎯 Easy sixes</b><small>6s come faster while all your tokens are at home — never more than 3 rolls to get out.</small></span>
+      </label>
+      <label class="switch-row">
+        <input type="checkbox" id="opt-gems">
+        <span class="switch" aria-hidden="true"></span>
+        <span class="switch-text"><b>💎 Gems</b><small>Everyone gets 5 gems. Spend one to re-roll the dice.</small></span>
+      </label>
+      <label class="switch-row">
+        <input type="checkbox" id="opt-quick">
+        <span class="switch" aria-hidden="true"></span>
+        <span class="switch-text"><b>⚡ Quick start</b><small>Everyone starts with one token already out.</small></span>
+      </label>
+      <p class="hint options-hint" id="options-hint"></p>
+    </section>
+
+    <section class="card">
+      <p class="field-label">Your dice</p>
+      <div class="skin-picker" id="lobby-skins" role="radiogroup" aria-label="Dice style"></div>
+    </section>
+
     <p id="lobby-hint" class="hint"></p>
     <button id="start-btn" class="btn primary big">Start game</button>
   </main>
@@ -111,13 +141,21 @@
     <div class="table" id="table">
       <div class="panel-slot" data-corner="tl"></div>
       <div class="panel-slot" data-corner="tr"></div>
-      <div class="board-wrap"><div id="board" class="board"></div></div>
+      <div class="board-wrap" id="board-wrap"><div id="board" class="board"></div><div id="banner" class="banner" aria-hidden="true"></div></div>
       <div class="panel-slot" data-corner="bl"></div>
       <div class="panel-slot" data-corner="br"></div>
     </div>
 
-    <div class="react-bar" id="react-bar" aria-label="Send a reaction"></div>
+    <div class="react-bar" id="react-bar" aria-label="Send a reaction">
+      <button id="gift-btn" class="emoji-btn gift" type="button" aria-label="Throw a sticker at a player" title="Throw a sticker">🎁</button>
+    </div>
   </main>
+
+  <!-- Sticker tray (opens when you tap another player) -->
+  <div id="sticker-tray" class="sticker-tray hidden" role="dialog" aria-label="Throw a sticker">
+    <div class="tray-title">Throw at <b id="tray-target"></b></div>
+    <div class="tray-grid" id="tray-grid"></div>
+  </div>
 
   <!-- Results -->
   <div id="results" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="results-title">

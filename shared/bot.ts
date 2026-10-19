@@ -1,5 +1,5 @@
 import { BASE, FINISH, LAST_TRACK, SAFE_SQUARES, START, TRACK_LENGTH, trackSquare, type Color } from "./board.js";
-import { capturesAt, currentColor, destination, type GameState } from "./rules.js";
+import { canReroll, capturesAt, currentColor, destination, type GameState } from "./rules.js";
 
 /** How many opponent tokens could reach this square with one roll (1–6). */
 function threats(g: GameState, color: Color, square: number): number {
@@ -58,4 +58,9 @@ export function chooseMove(g: GameState): number {
     if (s > bestScore) [best, bestScore] = [t, s];
   }
   return best;
+}
+
+/** Whether a computer player spends a gem on a re-roll. They only do it when they have no move. */
+export function wantsReroll(g: GameState): boolean {
+  return canReroll(g) && g.movable.length === 0 && Math.random() < 0.6;
 }
