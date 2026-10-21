@@ -96,7 +96,7 @@ export class Board {
     const defs = el("defs", {}, this.svg);
     // Soft shadow under each token.
     const shadow = el("filter", { id: "lift", x: "-50%", y: "-50%", width: "200%", height: "200%" }, defs);
-    el("feDropShadow", { dx: 0, dy: 0.06, stdDeviation: 0.05, "flood-color": INK, "flood-opacity": 0.45 }, shadow);
+    el("feDropShadow", { dx: 0, dy: 0.06, stdDeviation: 0.05, "flood-color": INK, "flood-opacity": 0.6 }, shadow);
   }
 
   private drawBoard(): void {
@@ -170,13 +170,15 @@ export class Board {
     g = el("g", { class: `token ${color}`, "data-color": color, "data-token": i });
     const body = el("g", { class: "token-body" }, g);
     el("circle", { r: 0.62, class: "token-hit" }, body);
-    el("circle", { r: 0.56, class: "token-ring", stroke: p.main }, body);
-    // A classic flat pawn: coloured disc, white ring, dark core and a little shine.
+    el("circle", { r: 0.6, class: "token-ring", stroke: p.main }, body);
+    // A bold flat pawn: thick dark outline and a white rim so it stands out on any
+    // square (even one of its own colour), then a coloured disc, ring and shine.
     const piece = el("g", { filter: "url(#lift)" }, body);
-    el("circle", { r: 0.42, fill: p.main, stroke: INK, "stroke-width": 0.07 }, piece);
-    el("circle", { r: 0.27, fill: "none", stroke: "#fff", "stroke-width": 0.1 }, piece);
-    el("circle", { r: 0.13, fill: p.dark }, piece);
-    el("ellipse", { cx: -0.13, cy: -0.18, rx: 0.13, ry: 0.07, fill: "#fff", "fill-opacity": 0.55, transform: "rotate(-30 -0.13 -0.18)" }, piece);
+    el("circle", { r: 0.47, fill: "#fff", stroke: INK, "stroke-width": 0.13 }, piece);
+    el("circle", { r: 0.36, fill: p.main, stroke: p.dark, "stroke-width": 0.05 }, piece);
+    el("circle", { r: 0.2, fill: "none", stroke: "#fff", "stroke-width": 0.08 }, piece);
+    el("circle", { r: 0.1, fill: p.dark }, piece);
+    el("ellipse", { cx: -0.13, cy: -0.17, rx: 0.12, ry: 0.06, fill: "#fff", "fill-opacity": 0.6, transform: "rotate(-30 -0.13 -0.17)" }, piece);
     g.addEventListener("click", () => this.pick(color, i));
     g.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
@@ -235,7 +237,7 @@ export class Board {
       3: [[-0.2, 0.12], [0.2, 0.12], [0, -0.18]],
       4: [[-0.2, -0.2], [0.2, -0.2], [-0.2, 0.2], [0.2, 0.2]],
     };
-    const scale: Record<number, number> = { 1: 1, 2: 0.78, 3: 0.68, 4: 0.6 };
+    const scale: Record<number, number> = { 1: 1, 2: 0.8, 3: 0.7, 4: 0.64 };
     for (const [spot, items] of groups) {
       const n = Math.min(items.length, 4);
       const finished = spot.startsWith("finish");
