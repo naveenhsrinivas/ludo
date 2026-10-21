@@ -73,7 +73,6 @@ export class Board {
   constructor(host: HTMLElement, private onPick: (token: number) => void) {
     this.svg = el("svg", { viewBox: "-0.3 -0.3 15.6 15.6", class: "board-svg", role: "img", "aria-label": "Ludo board" });
     this.world = el("g", { class: "world" }, this.svg);
-    this.drawDefs();
     this.drawBoard();
     this.hint = el("g", { class: "move-hint" }, this.world);
     this.tokenLayer = el("g", { class: "tokens" }, this.world);
@@ -92,13 +91,6 @@ export class Board {
   }
 
   // ---------- Static board ----------
-  private drawDefs(): void {
-    const defs = el("defs", {}, this.svg);
-    // Soft shadow under each token.
-    const shadow = el("filter", { id: "lift", x: "-50%", y: "-50%", width: "200%", height: "200%" }, defs);
-    el("feDropShadow", { dx: 0, dy: 0.06, stdDeviation: 0.05, "flood-color": INK, "flood-opacity": 0.6 }, shadow);
-  }
-
   private drawBoard(): void {
     const w = this.world;
     const line = { stroke: INK, "stroke-width": 0.06, "stroke-linejoin": "round" };
@@ -173,7 +165,9 @@ export class Board {
     el("circle", { r: 0.6, class: "token-ring", stroke: p.main }, body);
     // A bold flat pawn: thick dark outline and a white rim so it stands out on any
     // square (even one of its own colour), then a coloured disc, ring and shine.
-    const piece = el("g", { filter: "url(#lift)" }, body);
+    // A plain offset shadow: SVG blur filters render unreliably on some phones.
+    const piece = el("g", {}, body);
+    el("circle", { cy: 0.07, r: 0.53, fill: INK, "fill-opacity": 0.4 }, piece);
     el("circle", { r: 0.47, fill: "#fff", stroke: INK, "stroke-width": 0.13 }, piece);
     el("circle", { r: 0.36, fill: p.main, stroke: p.dark, "stroke-width": 0.05 }, piece);
     el("circle", { r: 0.2, fill: "none", stroke: "#fff", "stroke-width": 0.08 }, piece);

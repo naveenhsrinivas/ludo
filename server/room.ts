@@ -36,7 +36,7 @@ import {
 // LUDO_TIME_SCALE speeds everything up for tests.
 const SCALE = Number(process.env.LUDO_TIME_SCALE) || 1;
 export const TURN_TIME = 30_000 * SCALE; // a player has this long to roll or move
-const DECIDE_TIME = 12_000 * SCALE; // to choose re-roll or pass after a roll with no moves
+const DECIDE_TIME = 5_000 * SCALE; // to choose re-roll or pass after a roll with no moves
 const OFFLINE_DELAY = 4_000 * SCALE; // disconnected players are played for after this
 const BOT_ROLL_DELAY = 800 * SCALE;
 const BOT_MOVE_DELAY = 600 * SCALE;
