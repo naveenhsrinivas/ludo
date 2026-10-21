@@ -15,7 +15,6 @@ import {
   type Point,
 } from "../../shared/board.js";
 import { destination, type GameState, type MoveRecord } from "../../shared/rules.js";
-import { settle } from "./dice.js";
 import { play } from "./sound.js";
 
 const NS = "http://www.w3.org/2000/svg";
@@ -166,7 +165,7 @@ export class Board {
     // A bold flat pawn: thick dark outline and a white rim so it stands out on any
     // square (even one of its own colour), then a coloured disc, ring and shine.
     // A plain offset shadow: SVG blur filters render unreliably on some phones.
-    const piece = el("g", {}, body);
+    const piece = el("g", { class: "token-piece" }, body);
     el("circle", { cy: 0.07, r: 0.53, fill: INK, "fill-opacity": 0.4 }, piece);
     el("circle", { r: 0.47, fill: "#fff", stroke: INK, "stroke-width": 0.13 }, piece);
     el("circle", { r: 0.36, fill: p.main, stroke: p.dark, "stroke-width": 0.05 }, piece);
@@ -253,8 +252,10 @@ export class Board {
 
   private place(key: string, p: Placed): void {
     const g = this.tokens.get(key)!;
-    g.style.transform = `translate(${p.x}px, ${p.y}px)`;
-    (g.firstChild as SVGGElement).style.transform = `scale(${p.s})`;
+    // SVG transform attributes, not CSS transforms: iPhone browsers don't always
+    // draw CSS-transformed SVG elements.
+    g.setAttribute("transform", `translate(${p.x} ${p.y})`);
+    (g.firstChild as SVGGElement).setAttribute("transform", `scale(${p.s})`);
     this.placed.set(key, p);
   }
 
@@ -309,7 +310,7 @@ export class Board {
 
     this.tokenLayer.appendChild(node);
     node.classList.remove("movable");
-    (node.firstChild as SVGGElement).style.transform = "scale(1)";
+    (node.firstChild as SVGGElement).setAttribute("transform", "scale(1)");
 
     const steps: number[] = [];
     if (move.from === BASE) steps.push(0);
@@ -340,15 +341,33 @@ export class Board {
     }
   }
 
+  /** Move a token from `a` to `b` in an arc, frame by frame. */
   private hop(node: SVGGElement, a: Point, b: Point, ms: number, lift = 0.45): Promise<void> {
     const [ux, uy] = this.unrotate(0, -lift);
-    const mid = `translate(${(a[0] + b[0]) / 2 + ux}px, ${(a[1] + b[1]) / 2 + uy}px)`;
-    const end = `translate(${b[0]}px, ${b[1]}px)`;
-    const anim = node.animate(
-      [{ transform: `translate(${a[0]}px, ${a[1]}px)` }, { transform: mid }, { transform: end }],
-      { duration: ms, easing: "ease-in-out" }
-    );
-    node.style.transform = end;
-    return settle(anim, ms);
+    const mid: Point = [(a[0] + b[0]) / 2 + ux, (a[1] + b[1]) / 2 + uy];
+    const put = ([x, y]: Point) => node.setAttribute("transform", `translate(${x} ${y})`);
+    return new Promise((resolve) => {
+      const start = performance.now();
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(fallback);
+        put(b);
+        resolve();
+      };
+      // Frames don't run in background tabs, so don't wait on them forever.
+      const fallback = setTimeout(finish, ms + 150);
+      const frame = (now: number) => {
+        if (done) return;
+        const t = Math.min(1, (now - start) / ms);
+        if (t >= 1) return finish();
+        const e = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2; // ease-in-out
+        const [p, q, k] = e < 0.5 ? [a, mid, e * 2] : [mid, b, e * 2 - 1];
+        put([p[0] + (q[0] - p[0]) * k, p[1] + (q[1] - p[1]) * k]);
+        requestAnimationFrame(frame);
+      };
+      requestAnimationFrame(frame);
+    });
   }
 }

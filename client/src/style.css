@@ -377,27 +377,26 @@ button:disabled { cursor: default; }
   min-width: 240px;
   aspect-ratio: 1;
 }
-.board { width: 100%; height: 100%; }
+/* The shadow sits on the wrapper: a CSS filter on the SVG can hide its pieces on iPhones. */
+.board { width: 100%; height: 100%; border-radius: 5.8%; box-shadow: 0 18px 30px rgba(0, 0, 0, 0.55); }
 .board-svg {
   display: block;
   width: 100%;
   height: 100%;
   overflow: visible;
-  filter: drop-shadow(0 18px 30px rgba(0, 0, 0, 0.55));
   user-select: none;
   -webkit-user-select: none;
 }
 
 
 /* Tokens */
-.token { cursor: default; transition: transform 0.25s ease; outline: none; }
-.token-body { transition: transform 0.25s ease; }
+.token { cursor: default; outline: none; }
 .token-hit { fill: transparent; }
 .token-shadow { fill: rgba(0, 0, 0, 0.22); }
 .token-ring { fill: none; stroke-width: 0.1; opacity: 0; }
 .token.movable { cursor: pointer; }
 .token.movable .token-ring { opacity: 1; animation: ring 1s ease-in-out infinite; transform-origin: 0 0; }
-.token.movable .token-body { animation: bounce 1s ease-in-out infinite; }
+.token.movable .token-piece { animation: bounce 1s ease-in-out infinite; }
 .token.movable:focus-visible .token-ring { stroke: var(--gold) !important; stroke-width: 0.14; }
 .token.done { opacity: 0.95; }
 @keyframes ring {
